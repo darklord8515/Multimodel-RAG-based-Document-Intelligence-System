@@ -1,0 +1,9 @@
+lightrag-hku<1.5
+python-dotenv
+fastapi
+uvicorn[standard]
+python-multipart
+fastembed
+pypdf
+python-docx
+openai

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RAG-Anything</title>
+  <meta name="description" content="Multimodal document intelligence: upload files and chat with them.">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <button id="openLib" class="icon-btn only-mobile" type="button" aria-label="Open library">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <div class="brand">
+      <span class="brand-mark"><img src="/icon.png" alt="" width="28" height="28"></span>
+      <span class="brand-text">
+        <strong><span class="b">RAG</span><span class="o">-</span>Anything</strong>
+        <small>Multimodal Document Intelligence</small>
+      </span>
+    </div>
+    <div class="spacer"></div>
+    <span id="status" class="pill" hidden></span>
+    <button id="theme" class="icon-btn" type="button" aria-label="Toggle theme" title="Toggle theme">
+      <svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+  </header>
+
+  <div id="banner" class="banner" role="alert" hidden></div>
+
+  <div class="shell">
+    <div id="scrim" class="scrim" hidden></div>
+
+    <aside id="library" class="library" aria-label="Document library">
+      <div class="lib-head">
+        <h2>Library</h2>
+        <span id="count" class="count">0 documents</span>
+        <button id="closeLib" class="icon-btn only-mobile" type="button" aria-label="Close library">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+
+      <label id="drop" class="drop" tabindex="0">
+        <input id="file" type="file" multiple hidden>
+        <span class="drop-ico"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 20h14"/></svg></span>
+        <strong>Drop files or click to upload</strong>
+        <small id="exts">PDF, DOCX, TXT, CSV, images</small>
+        <span id="bar" class="bar" hidden><i></i></span>
+      </label>
+
+      <ul id="docs" class="docs"></ul>
+      <div id="empty" class="empty-lib">
+        <p>No documents yet.</p>
+        <small>Upload something and it will appear here as it is indexed.</small>
+      </div>
+    </aside>
+
+    <main class="chat" aria-label="Chat">
+      <div class="chat-head">
+        <div>
+          <h2>Ask your documents</h2>
+          <p id="hint">Answers are grounded in your uploaded files, with sources.</p>
+        </div>
+        <button id="clear" class="ghost" type="button">Clear chat</button>
+      </div>
+
+      <div id="log" class="log" aria-live="polite"></div>
+
+      <form id="form" class="composer">
+        <div class="box">
+          <textarea id="q" rows="1" placeholder="Ask a question about your documents…" maxlength="4000" aria-label="Your question"></textarea>
+          <div class="row">
+            <label class="mode">
+              <span>Search</span>
+              <select id="mode" aria-label="Retrieval mode">
+                <option value="mix">Mix · recommended</option>
+                <option value="hybrid">Hybrid</option>
+                <option value="local">Local · entities</option>
+                <option value="global">Global · themes</option>
+                <option value="naive">Naive · text only</option>
+              </select>
+            </label>
+            <span class="kbd">Enter to send · Shift+Enter for newline</span>
+            <button id="send" type="submit" aria-label="Send">
+              <svg viewBox="0 0 24 24"><path d="M5 12h14m0 0-6-6m6 6-6 6"/></svg>
+            </button>
+          </div>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

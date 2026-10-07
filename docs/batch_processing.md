@@ -1,0 +1,485 @@
+# Batch Processing
+
+This document describes the batch processing feature for RAG-Anything, which allows you to process multiple documents in parallel for improved throughput.
+
+## Overview
+
+The batch processing feature allows you to process multiple documents concurrently, significantly improving throughput for large document collections. It provides parallel processing, progress tracking, error handling, and flexible configuration options.
+
+## Key Features
+
+- **Parallel Processing**: Process multiple files concurrently using thread pools
+- **Progress Tracking**: Real-time progress bars with `tqdm`
+- **Error Handling**: Comprehensive error reporting and recovery
+- **Flexible Input**: Support for files, directories, and recursive search
+- **Collision-safe Outputs**: Isolated output directories for same-name files
+- **Dry Run**: Preview which files would be processed without running parsers
+- **Configurable Workers**: Adjustable number of parallel workers
+- **Installation Check Bypass**: Optional skip for environments with package conflicts
+
+## Installation
+
+```bash
+# Basic installation
+pip install raganything[all]
+
+# Required for batch processing
+pip install tqdm
+
+# Optional for parser='paddleocr'
+pip install raganything[paddleocr]
+```
+
+## Usage
+
+### Basic Batch Processing
+
+```python
+from raganything.batch_parser import BatchParser
+
+# Create batch parser
+batch_parser = BatchParser(
+    parser_type="mineru",  # or "docling" or "paddleocr"
+    max_workers=4,
+    show_progress=True,
+    timeout_per_file=300,
+    skip_installation_check=False  # Set to True if having parser installation issues
+)
+
+# Process multiple files
+result = batch_parser.process_batch(
+    file_paths=["doc1.pdf", "doc2.docx", "folder/"],
+    output_dir="./batch_output",
+    parse_method="auto",
+    recursive=True
+)
+
+# Check results
+print(result.summary())
+print(f"Success rate: {result.success_rate:.1f}%")
+print(f"Processing time: {result.processing_time:.2f} seconds")
+```
+
+### Output Layout
+
+Each input file is assigned a deterministic subdirectory under `output_dir`:
+
+```
+<output_dir>/<file-stem>_<path-hash>/
+```
+
+The readable file stem is combined with a short hash of the resolved input path.
+This keeps parser artifacts from being overwritten when different directories
+contain files with the same name, and gives repeated runs for the same input a
+stable output location.
+
+### Asynchronous Batch Processing
+
+```python
+import asyncio
+from raganything.batch_parser import BatchParser
+
+async def async_batch_processing():
+    batch_parser = BatchParser(
+        parser_type="mineru",
+        max_workers=4,
+        show_progress=True
+    )
+
+    # Process files asynchronously
+    result = await batch_parser.process_batch_async(
+        file_paths=["doc1.pdf", "doc2.docx"],
+        output_dir="./output",
+        parse_method="auto"
+    )
+
+    return result
+
+# Run async processing
+result = asyncio.run(async_batch_processing())
+```
+
+### Integration with RAG-Anything
+
+```python
+from raganything import RAGAnything
+
+rag = RAGAnything()
+
+# Process documents with batch functionality
+result = rag.process_documents_batch(
+    file_paths=["doc1.pdf", "doc2.docx"],
+    output_dir="./output",
+    max_workers=4,
+    show_progress=True
+)
+
+print(f"Processed {len(result.successful_files)} files successfully")
+```
+
+### Process Documents with RAG Integration
+
+```python
+# Process documents in batch and then add them to RAG
+result = await rag.process_documents_with_rag_batch(
+    file_paths=["doc1.pdf", "doc2.docx"],
+    output_dir="./output",
+    max_workers=4,
+    show_progress=True
+)
+
+print(f"Processed {result['successful_rag_files']} files with RAG")
+print(f"Total processing time: {result['total_processing_time']:.2f} seconds")
+```
+
+### Command Line Interface
+
+```bash
+# Basic batch processing
+python -m raganything.batch_parser examples/sample_docs/ --output ./output --workers 4
+
+# With specific parser
+python -m raganything.batch_parser examples/sample_docs/ --parser mineru --method auto
+python -m raganything.batch_parser examples/sample_docs/ --parser paddleocr --method ocr
+
+# Without progress bar
+python -m raganything.batch_parser examples/sample_docs/ --output ./output --no-progress
+
+# Only process files directly inside the specified directories
+python -m raganything.batch_parser examples/sample_docs/ --output ./output --no-recursive
+
+# Dry run (list supported files without processing)
+python -m raganything.batch_parser examples/sample_docs/ --output ./output --dry-run
+
+# Incremental run (skip files unchanged since the last successful batch)
+python -m raganything.batch_parser examples/sample_docs/ --output ./output --incremental
+
+# Help
+python -m raganything.batch_parser --help
+```
+
+### Incremental Folder Scans
+
+Use `incremental=True` when repeatedly processing the same folder. RAG-Anything
+stores a manifest at `.raganything_batch_manifest.json` inside the output
+directory and skips files that are unchanged since the last successful run. A
+file is skipped only when both its content and the parsing configuration match
+the manifest:
+
+- **Content** — size and modification time; only when those differ is the MD5
+  hash recomputed and compared, so large unchanged files are not re-hashed on
+  every run.
+- **Parsing configuration** — a SHA-256 digest of the parser name, the
+  `parse_method`, and the parser options. Built-in options that change the
+  parse result (`lang`, `device`, `start_page`, `end_page`, `formula`, `table`,
+  `backend`, `source`, `include_layout_blocks`) are normalised the same way as
+  the parse cache, so passing a default explicitly (for example
+  `include_layout_blocks=False` or `lang=None`) or changing the parser name's
+  case does not trigger a reparse. Any other option is kept verbatim, since a
+  custom parser may depend on it. Worker count, progress display and scan
+  settings are not part of the digest, and raw option values are never written
+  to the manifest.
+
+Changing the parser, `parse_method` or a result-affecting option reparses the
+affected files. After upgrading, manifests written by older versions have no
+configuration digest, so every file is reparsed once. A file whose reparse
+fails is removed from the manifest so the next run retries it, and options that
+cannot be serialised to JSON disable reuse for that run.
+
+```python
+result = batch_parser.process_batch(
+    file_paths=["./documents"],
+    output_dir="./output",
+    recursive=True,
+    incremental=True,
+)
+
+print(f"Processed: {len(result.successful_files)}")
+print(f"Skipped unchanged: {len(result.skipped_files)}")
+```
+
+## Configuration
+
+### Environment Variables
+
+```env
+# Batch processing configuration
+MAX_CONCURRENT_FILES=4
+SUPPORTED_FILE_EXTENSIONS=.pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.txt,.md
+RECURSIVE_FOLDER_PROCESSING=true
+OUTPUT_DIR=./parsed_output
+```
+
+### BatchParser Parameters
+
+- **parser_type**: `"mineru"`, `"docling"`, or `"paddleocr"` (default: `"mineru"`)
+- **max_workers**: Number of parallel workers (default: `4`)
+- **show_progress**: Show progress bar (default: `True`)
+- **timeout_per_file**: Timeout per file in seconds (default: `300`)
+- **skip_installation_check**: Skip parser installation check (default: `False`)
+
+### Multimodal ingestion concurrency
+
+Parsing workers and multimodal ingestion have separate limits:
+
+- `BatchParser.max_workers` controls parallel file parsing. Increasing it does not
+  increase image-description concurrency inside one document.
+- `LightRAG.max_parallel_insert` also limits concurrent multimodal item section
+  generation in RAG-Anything's type-aware batch path, reached by
+  `insert_content_list()` and `process_document_complete()`. This includes image
+  descriptions. The limit is taken from the LightRAG instance; RAG-Anything falls
+  back to `2` only when that attribute is absent.
+- `llm_model_max_async` controls LightRAG's wrapped LLM calls, including the later
+  entity-extraction and graph-merge stages. Multimodal description generation
+  calls the `llm_model_func` or `vision_model_func` supplied to `RAGAnything`
+  directly, outside that wrapper, so `llm_model_max_async` does not throttle
+  those direct calls. An already wrapped model function, including one inherited
+  from an existing LightRAG instance, can still impose its own limit.
+
+When RAG-Anything creates LightRAG, set the item limit through `lightrag_kwargs`
+(alongside your existing model and embedding configuration):
+
+```python
+rag = RAGAnything(
+    llm_model_func=llm_model_func,
+    vision_model_func=vision_model_func,
+    embedding_func=embedding_func,
+    lightrag_kwargs={"max_parallel_insert": 4},
+)
+```
+
+If you supply `RAGAnything(lightrag=existing_lightrag, ...)`, configure
+`max_parallel_insert` on that LightRAG instance instead; `lightrag_kwargs` does not
+reconfigure an existing instance. LightRAG 1.4.16 defaults this setting to `2`,
+with an environment override via `MAX_PARALLEL_INSERT`; check your installed
+LightRAG version and effective instance value. Use a positive integer.
+
+The semaphore is created **per multimodal batch call**, not globally or per
+RAG-Anything instance. The limits can therefore multiply:
+
+- `process_folder_complete()` processes up to `max_workers` files concurrently,
+  defaulting to `MAX_CONCURRENT_FILES` (`config.max_concurrent_files`). Each file
+  has its own multimodal batch semaphore, so concurrent image/table caption calls
+  can reach `MAX_CONCURRENT_FILES × max_parallel_insert` with the default worker
+  setting, or `max_workers × max_parallel_insert` when overridden.
+- Video scene description creates a second semaphore of `max_parallel_insert`
+  for each video. A batch with enough video items and scenes can therefore issue
+  up to `max_parallel_insert²` concurrent VLM calls. Concurrent files can multiply
+  that further.
+
+These bounds assume enough ready work and no additional model/provider limiter.
+The item semaphore covers section generation, not the subsequent entity
+extraction and graph merge stages, which use LightRAG's wrapped LLM. Those stages
+can make additional LLM calls, so this setting neither reduces call count nor
+guarantees one call per image or a particular speedup. Tune conservatively
+against provider rate limits and measure both call counts and stage timings on
+a small representative document.
+
+Text indexing goes through LightRAG's single document pipeline per workspace. A
+file whose text arrives while a pipeline run is busy is queued and indexed by
+that run (queued files fetched together are indexed in parallel, up to
+`max_parallel_insert`), using the `split_by_character` settings of the insert
+that started the run; RAG-Anything waits for its text before going on to the
+file's multimodal content. If LightRAG fails a file's text (for example, the LLM
+is unavailable) and no run is left to retry it, `process_document_complete()` and
+`insert_content_list()` raise and the document stays `failed` in `doc_status`;
+LightRAG retries failed documents on its next pipeline run, such as when the file
+is processed again. If the last pipeline run was cancelled by the user, they raise
+instead of restarting it.
+
+## Supported File Types
+
+- **PDF files**: `.pdf`
+- **Office documents**: `.doc`, `.docx`, `.ppt`, `.pptx`, `.xls`, `.xlsx`
+- **Images**: `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tiff`, `.tif`, `.gif`, `.webp`
+- **Text files**: `.txt`, `.md`
+
+## API Reference
+
+### BatchProcessingResult
+
+```python
+@dataclass
+class BatchProcessingResult:
+    successful_files: List[str]      # Successfully processed files
+    failed_files: List[str]          # Failed files
+    total_files: int                 # Total number of files
+    processing_time: float           # Total processing time in seconds
+    errors: Dict[str, str]           # Error messages for failed files
+    output_dir: str                  # Output directory used
+    dry_run: bool                    # True if run was a dry-run
+    skipped_files: List[str]         # Unchanged files skipped in incremental mode
+
+    def summary(self) -> str:        # Human-readable summary
+
+    @property
+    def success_rate(self) -> float: # Success rate as percentage
+```
+
+### BatchParser Methods
+
+```python
+class BatchParser:
+    def __init__(self, parser_type: str = "mineru", max_workers: int = 4, ...):
+        """Initialize batch parser"""
+
+    def get_supported_extensions(self) -> List[str]:
+        """Get list of supported file extensions"""
+
+    def filter_supported_files(self, file_paths: List[str], recursive: bool = True) -> List[str]:
+        """Filter files to only supported types"""
+
+    def process_batch(self, file_paths: List[str], output_dir: str, ...) -> BatchProcessingResult:
+        """Process files in batch"""
+
+    async def process_batch_async(self, file_paths: List[str], output_dir: str, ...) -> BatchProcessingResult:
+        """Process files in batch asynchronously"""
+```
+
+## Performance Considerations
+
+### Memory Usage
+- Each worker uses additional memory
+- Recommended: 2-4 workers for most systems
+- Monitor memory usage with large files
+
+### CPU Usage
+- Parallel processing utilizes multiple cores
+- Optimal worker count depends on CPU cores and file sizes
+- I/O may become bottleneck with many small files
+
+### Recommended Settings
+- **Small files** (< 1MB): Higher worker count (6-8)
+- **Large files** (> 100MB): Lower worker count (2-3)
+- **Mixed sizes**: Start with 4 workers and adjust
+
+## Troubleshooting
+
+### Common Issues
+
+#### Memory Errors
+```python
+# Solution: Reduce max_workers
+batch_parser = BatchParser(max_workers=2)
+```
+
+#### Timeout Errors
+```python
+# Solution: Increase timeout_per_file
+batch_parser = BatchParser(timeout_per_file=600)  # 10 minutes
+```
+
+#### Parser Installation Issues
+```python
+# Solution: Skip installation check
+batch_parser = BatchParser(skip_installation_check=True)
+```
+
+#### File Not Found Errors
+- Check file paths and permissions
+- Ensure input files exist
+- Verify directory access rights
+
+### Debug Mode
+
+Enable debug logging for detailed information:
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+# Create batch parser with debug logging
+batch_parser = BatchParser(parser_type="mineru", max_workers=2)
+```
+
+### Error Handling
+
+The batch processor provides comprehensive error handling:
+
+```python
+result = batch_parser.process_batch(
+    file_paths=["doc1.pdf", "doc2.docx"],
+    output_dir="./batch_output",
+)
+
+# Check for errors
+if result.failed_files:
+    print("Failed files:")
+    for file_path in result.failed_files:
+        error_message = result.errors.get(file_path, "Unknown error")
+        print(f"  - {file_path}: {error_message}")
+
+# Process only successful files
+for file_path in result.successful_files:
+    print(f"Successfully processed: {file_path}")
+```
+
+## Examples
+
+### Process Entire Directory
+
+```python
+from pathlib import Path
+
+# Process all supported files in a directory
+batch_parser = BatchParser(max_workers=4)
+directory_path = Path("./documents")
+
+result = batch_parser.process_batch(
+    file_paths=[str(directory_path)],
+    output_dir="./processed",
+    recursive=True  # Include subdirectories
+)
+
+print(f"Processed {len(result.successful_files)} out of {result.total_files} files")
+```
+
+### Filter Files Before Processing
+
+```python
+# Get all files in directory
+all_files = ["doc1.pdf", "image.png", "spreadsheet.xlsx", "unsupported.xyz"]
+
+# Filter to supported files only
+supported_files = batch_parser.filter_supported_files(all_files)
+print(f"Will process {len(supported_files)} out of {len(all_files)} files")
+
+# Process only supported files
+result = batch_parser.process_batch(
+    file_paths=supported_files,
+    output_dir="./output"
+)
+```
+
+### Custom Error Handling
+
+```python
+def process_with_retry(file_paths, max_retries=3):
+    """Process files with retry logic"""
+
+    for attempt in range(max_retries):
+        result = batch_parser.process_batch(file_paths, "./output")
+
+        if not result.failed_files:
+            break  # All files processed successfully
+
+        print(f"Attempt {attempt + 1}: {len(result.failed_files)} files failed")
+        file_paths = result.failed_files  # Retry failed files
+
+    return result
+```
+
+## Best Practices
+
+1. **Start with default settings** and adjust based on performance
+2. **Monitor system resources** during batch processing
+3. **Use appropriate worker counts** for your hardware
+4. **Handle errors gracefully** with retry logic
+5. **Test with small batches** before processing large collections
+6. **Use skip_installation_check** if facing parser installation issues
+7. **Enable progress tracking** for long-running operations
+8. **Set appropriate timeouts** based on expected file processing times
+
+## Conclusion
+
+The batch processing feature significantly improves RAG-Anything's throughput for large document collections. It provides flexible configuration options, comprehensive error handling, and seamless integration with the existing RAG-Anything pipeline.
